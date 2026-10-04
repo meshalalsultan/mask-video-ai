@@ -1,0 +1,4 @@
+Options -Indexes
+<FilesMatch "^(config\..*\.php|\.env.*|\.git.*)$">
+    Require all denied
+</FilesMatch>

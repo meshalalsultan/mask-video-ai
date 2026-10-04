@@ -1,0 +1,10 @@
+/config.local.php
+/.env*
+/storage/tasks/*
+!/storage/tasks/.gitkeep
+/storage/videos/*
+!/storage/videos/.gitkeep
+*.log
+*.zip
+.DS_Store
+Thumbs.db

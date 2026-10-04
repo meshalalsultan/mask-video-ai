@@ -1,0 +1,21 @@
+name: التحقق من النموذج الأولي
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring
+      - name: فحص صياغة PHP
+        run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: اختبارات منطق التطبيق
+        run: php tests/run.php
+      - name: اختبار نقاط HTTP محليًا
+        run: python3 tests/http_smoke.py
+      - name: فحص JavaScript
+        run: node --check public/assets/app.js
