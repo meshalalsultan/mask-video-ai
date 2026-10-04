@@ -86,74 +86,47 @@ final class TaskStore
     }
 }
 
-final class RunwayClient
+final class SdkBridge
 {
-    public function __construct(private readonly array $config, private readonly ?Closure $transport = null) {}
+    public function __construct(private readonly array $config) {}
 
-    public function create(string $prompt): string
+    public function health(): bool
     {
-        $data = $this->request('POST', '/v1/text_to_video', [
-            'model' => $this->config['model'], 'promptText' => validatePrompt($prompt),
-            'duration' => $this->config['duration'], 'ratio' => $this->config['ratio'],
-        ]);
-        $id = $data['id'] ?? '';
-        if (!is_string($id) || !preg_match('/^[a-zA-Z0-9-]{1,100}$/D', $id)) {
-            throw new AppError('رد التوليد غير واضح. راجع لوحة Runway قبل إنشاء طلب جديد.', 502, true);
-        }
-        return $id;
+        try { return $this->request('GET', '/health')['ready'] === true; }
+        catch (AppError) { return false; }
     }
 
-    public function status(string $id): array
+    public function active(string $id): bool
     {
-        if (!preg_match('/^[a-zA-Z0-9-]{1,100}$/D', $id)) { throw new AppError('معرّف المزود غير صالح.'); }
-        $data = $this->request('GET', '/v1/tasks/' . $id);
-        $allowed = ['PENDING', 'THROTTLED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED'];
-        if (!in_array($data['status'] ?? '', $allowed, true)) {
-            throw new AppError('حالة غير معروفة من المزود. أعد متابعة الطلب بعد قليل.', 502);
-        }
-        return $data;
+        if (!validId($id)) { throw new AppError('معرّف الطلب غير صالح.'); }
+        return $this->request('GET', '/active?id=' . $id)['active'] === true;
+    }
+
+    public function start(string $id, bool $resume = false): void
+    {
+        if (!validId($id)) { throw new AppError('معرّف الطلب غير صالح.'); }
+        $this->request('POST', $resume ? '/resume' : '/start', [
+            'id' => $id, 'api_key' => $this->config['api_key'], 'php_binary' => $this->config['php_cli'],
+        ]);
     }
 
     private function request(string $method, string $path, ?array $body = null): array
     {
-        if ($this->transport !== null) {
-            [$code, $raw] = ($this->transport)($method, $path, $body);
-        } else {
-            $ch = curl_init('https://api.dev.runwayml.com' . $path);
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 45,
-                CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $this->config['api_key'],
-                    'X-Runway-Version: ' . $this->config['api_version'],
-                    'Content-Type: application/json', 'Accept: application/json',
-                ],
-            ]);
-            if ($body !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_THROW_ON_ERROR)); }
-            $raw = curl_exec($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if ($raw === false) {
-                throw new AppError($method === 'POST'
-                    ? 'انقطع الاتصال أثناء إرسال الطلب. قد يكون التوليد بدأ؛ راجع لوحة Runway قبل إرسال طلب جديد.'
-                    : 'تعذر الاتصال بRunway. يمكنك متابعة نفس الطلب بعد قليل.', 502, $method === 'POST');
-            }
-        }
-        // لا نعيد رسائل المزود الخام أو روابطه الموقعة أو مفتاح API للمتصفح.
-        if ($code < 200 || $code >= 300) {
-            $message = match ($code) {
-                401, 403 => 'تحقق من مفتاح Runway وصلاحيات المشروع.',
-                402 => 'رصيد Runway غير كافٍ. تحقق من حساب المطور.',
-                429 => 'وصل الحساب إلى حد الطلبات. انتظر قليلًا.',
-                400, 422 => 'رفض المزود إعدادات الطلب أو محتواه. راجع الوصف وإعدادات النموذج.',
-                default => 'خطأ من Runway. راجع لوحة الحساب قبل تكرار طلب التوليد.',
-            };
-            throw new AppError($message, $code === 429 ? 429 : 502, $method === 'POST' && $code >= 500);
+        // العنوان ثابت ومحلي؛ المفتاح لا يصل إلى JavaScript أو سجلات الطلبات.
+        $ch = curl_init('http://127.0.0.1:' . $this->config['sdk_port'] . $path);
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 1, CURLOPT_TIMEOUT => 5, CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_PROXY => '', CURLOPT_HTTPHEADER => ['Content-Type: application/json']]);
+        if ($body !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_THROW_ON_ERROR)); }
+        $raw = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $code < 200 || $code >= 300) {
+            throw new AppError('تعذر الوصول لخدمة SDK. شغّل npm start ثم تابع نفس الطلب.', 503, $method === 'POST');
         }
         try { $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR); }
-        catch (JsonException) { throw new AppError('رد المزود غير صالح. راجع لوحة Runway قبل تكرار التوليد.', 502, $method === 'POST'); }
-        if (!is_array($data)) { throw new AppError('رد المزود غير صالح.', 502, $method === 'POST'); }
+        catch (JsonException) { throw new AppError('رد خدمة SDK غير صالح.', 503, $method === 'POST'); }
+        if (!is_array($data)) { throw new AppError('رد خدمة SDK غير صالح.', 503, $method === 'POST'); }
         return $data;
     }
 }

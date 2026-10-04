@@ -36,10 +36,13 @@ if (is_file($local)) {
     if (!is_array($override)) { throw new AppError('ملف الإعدادات غير صالح.', 503); }
     $config = array_replace($config, $override);
 }
-$config['api_key'] = getenv('RUNWAY_API_KEY') ?: $config['api_key'];
+$config['api_key'] = getenv('RUNWAYML_API_SECRET') ?: (getenv('RUNWAY_API_KEY') ?: $config['api_key']);
 if ($config['model'] !== 'gen4.5' || !in_array($config['duration'], [5, 10], true)
     || !in_array($config['ratio'], ['720:1280', '1280:720'], true)) {
     throw new AppError('إعدادات النموذج غير مدعومة في هذه النسخة.', 503);
+}
+if (!is_int($config['sdk_port']) || $config['sdk_port'] < 1024 || $config['sdk_port'] > 65535) {
+    throw new AppError('منفذ خدمة SDK غير صالح.', 503);
 }
 foreach (['tasks', 'videos'] as $folder) {
     $directory = $config['storage_dir'] . '/' . $folder;
@@ -54,7 +57,7 @@ $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
 $_SESSION['tasks'] ??= [];
 $owner = hash('sha256', session_id());
 $store = new TaskStore($config['storage_dir'] . '/tasks');
-$client = new RunwayClient($config);
+$client = new SdkBridge($config);
 
 function requirePost(): array
 {
@@ -73,7 +76,7 @@ function requirePost(): array
 function requireKey(): void
 {
     global $config;
-    if (trim($config['api_key']) === '') { throw new AppError('أضف مفتاح Runway في config.local.php أولًا.', 503); }
+    if (trim($config['api_key']) === '') { throw new AppError('أضف RUNWAYML_API_SECRET لبيئة PHP أو مفتاح Runway في config.local.php أولًا.', 503); }
 }
 
 function publicTask(array $task): array

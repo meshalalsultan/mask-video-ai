@@ -1,0 +1,8 @@
+{
+  "name": "mask-video-ai",
+  "version": "0.2.0",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node sdk/service.mjs", "test": "node --test tests/sdk.test.mjs" },
+  "dependencies": { "@runwayml/sdk": "4.21.0" }
+}

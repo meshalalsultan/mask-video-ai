@@ -11,6 +11,14 @@ jobs:
         with:
           php-version: '8.2'
           extensions: curl, mbstring
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: تثبيت SDK الرسمي
+        run: npm ci --ignore-scripts
+      - name: اختبار SDK والاستئناف دون اتصال بالمزود
+        run: npm test
       - name: فحص صياغة PHP
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: اختبارات منطق التطبيق
